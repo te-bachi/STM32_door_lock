@@ -50,16 +50,22 @@ endif
 # target: dependencies
 # [tab] system command
 #
+# target: normal-prerequisites | order-only-prerequisites
+# [tab] recipe
+#
 # $(foreach var,list,text)      For each newly created variable 'var' in 'list',
 #                               do whatever in 'text'
 # $(call variable,param,...)    Call a defined subroutine
 # $(1), $(2)                    Arguments of defined subroutines
 # $(var:pattern=replacement)    Substitutes 'var' with 'replacement'
-# $(info var)                   Expand 'var' and parse as makefile syntax
+# $(eval var)                   Expand 'var' and parse as makefile syntax
 # $(info var)                   Debug Makefile
 # $(dir filename)               Extracts the directory-part of each filename
+# $(addprefix prefix,names)     Add prefix to names, ex. $(addprefix src/,foo bar)
+#                               Result: src/foo src/bar
 # 
 
+### FIRST TARGET: ALL #########################################################
 all:
 	@echo Use 'make debug' or 'make release'
 
@@ -77,39 +83,48 @@ $(OBJ_DIR)/$(1)/$(2):
 
 endef
 
-### VARIABLE FOR EVERY PROGRAM ################################################
+### SOURCE FOR EVERY PROGRAM ##################################################
 # $(1) = build type, ex. debug, release
 # $(2) = program name
 
-define VARIABLE_template
-
-$(info $(1) - $(2))
+define SOURCE_template
 
 $(1)_$(2)_C_SOURCE   = $(filter %.$(C_SOURCE_FORMAT),$($(2)_SOURCE))
 $(1)_$(2)_CXX_SOURCE = $(filter %.$(CXX_SOURCE_FORMAT),$($(2)_SOURCE))
 
-$(info $($(2)_SOURCE))
-$(info $($(1)_$(2)_C_SOURCE))
-$(info $($(1)_$(2)_CXX_SOURCE))
+endef
+
+
+### OBJECT FOR EVERY PROGRAM ##################################################
+# $(1) = build type, ex. debug, release
+# $(2) = program name
+
+define OBJECT_template
 
 $(1)_$(2)_C_OBJECT   = $(addprefix obj/$(1)/$(2)/,$($(1)_$(2)_C_SOURCE:%.$(C_SOURCE_FORMAT)=%.o))
 $(1)_$(2)_CXX_OBJECT = $(addprefix obj/$(1)/$(2)/,$($(1)_$(2)_CXX_SOURCE:%.$(CXX_SOURCE_FORMAT)=%.o))
 
-$(info $($(1)_$(2)_C_OBJECT))
-$(info $($(1)_$(2)_CXX_OBJECT))
-
-$(foreach folder,$(addprefix $(2)/,$(sort $(dir $($(2)_SOURCE)))),$(info $(call DIRECTORY_template,$(1),$(folder))))
+# Create build directory to put objects into
+$(foreach folder,$(addprefix $(2)/,$(sort $(dir $($(2)_SOURCE)))),$(eval $(call DIRECTORY_template,$(1),$(folder))))
 
 endef
 
-### OBJECT FOR EVERY SOURCE FILE ##############################################
+### COMPILE FOR EVERY SOURCE FILE ##############################################
 # $(1) = build type, ex. debug, release
 # $(2) = program name
 # $(3) = source directory
 # $(4) = one single source file
 # $(5) = specific CFLAGS
 
-define C_OBJECT_template
+#(info C_COMPILE)
+#(info build type:             $(1))
+#(info program name:           $(2))
+#(info source directory:       $(3))
+#(info one single source file: $($(4)))
+#(info specific CFLAGS:        $($(5)))
+#(info .)
+
+define C_COMPILE_template
 
 obj/$(1)/$(2)/$($(4):%.$(C_SOURCE_FORMAT)=%.o): obj/$(1)/$(2)/$(dir $($(4))) $(3)/$($(4))
 	@echo "[CC   ] $(3)/$($(4))"
@@ -117,7 +132,7 @@ obj/$(1)/$(2)/$($(4):%.$(C_SOURCE_FORMAT)=%.o): obj/$(1)/$(2)/$(dir $($(4))) $(3
 
 endef
 
-define CXX_OBJECT_template
+define CXX_COMPILE_template
 
 obj/$(1)/$(2)/$($(4):%.$(CXX_SOURCE_FORMAT)=%.o): obj/$(1)/$(2)/$(dir $($(4))) $(3)/$($(4))
 	@echo "[CXX  ] $(3)/$($(4))"
@@ -134,14 +149,14 @@ endef
 
 define PROGRAM_template
 
-$(foreach source,$($(2)_SOURCE),$(info $(call C_OBJECT_template,$(1),$(2),$(SRC_DIR),source,$(4))))
-$(foreach source,$($(2)_SOURCE),$(info $(call CXX_OBJECT_template,$(1),$(2),$(SRC_DIR),source,$(4))))
+$(foreach source,$($(1)_$(2)_C_SOURCE),$(eval $(call C_COMPILE_template,$(1),$(2),$(SRC_DIR),source,$(4))))
+$(foreach source,$($(1)_$(2)_CXX_SOURCE),$(eval $(call CXX_COMPILE_template,$(1),$(2),$(SRC_DIR),source,$(4))))
 
 $(3)/$(1)/$(2)$(ELF_SUFFIX): $($(1)_$(2)_C_OBJECT) $($(1)_$(2)_CXX_OBJECT)
 	@mkdir -p $(3)/$(1)
 	
 	@echo "[LD   ] $(3)/$(1)/$(2)$(ELF_SUFFIX)"
-	$(SILENT)$(LD) -T $($(2)_LDSCRIPT) -o $(3)/$(1)/$(2)$(ELF_SUFFIX) $($(1)_$(2)_C_OBJECT) $($(1)_$(2)_CXX_OBJECT) $(global_LDFLAGS) $($(5)) $($(2)_LDFLAGS)
+	$(SILENT)$(LD) $(addprefix -T ,$($(2)_LDSCRIPT)) -o $(3)/$(1)/$(2)$(ELF_SUFFIX) $($(1)_$(2)_C_OBJECT) $($(1)_$(2)_CXX_OBJECT) $(global_LDFLAGS) $($(5)) $($(2)_LDFLAGS)
 	
 	@echo "[HEX  ] $(3)/$(1)/$(2)$(HEX_SUFFIX)"
 	$(SILENT)$(OBJCOPY) $(OBJCOPY_HEX_FLAGS) $(3)/$(1)/$(2)$(ELF_SUFFIX) $(3)/$(1)/$(2)$(HEX_SUFFIX)
@@ -163,15 +178,21 @@ endef
 
 define BUILD_template
 
+# add prefix, ex. bin/debug to all PROGRAMS: prog.elf
 $(1): $(foreach prog, $(PROGRAMS), $(addprefix $(BIN_DIR)/$(1),/$(prog)$(ELF_SUFFIX)))
 	@echo [DONE ]
 
-$(foreach prog, $(PROGRAMS), $(info $(call VARIABLE_template,$(1),$(prog),$(addprefix $(1),_CFLAGS))))
-$(foreach prog, $(PROGRAMS), $(info $(call PROGRAM_template,$(1),$(prog),bin,$(addprefix $(1),_CFLAGS),$(addprefix $(1),_LDFLAGS))))
+$(foreach prog, $(PROGRAMS), $(eval $(call SOURCE_template,$(1),$(prog),$(addprefix $(1),_CFLAGS))))
+$(foreach prog, $(PROGRAMS), $(eval $(call OBJECT_template,$(1),$(prog),$(addprefix $(1),_CFLAGS))))
+$(foreach prog, $(PROGRAMS), $(eval $(call PROGRAM_template,$(1),$(prog),bin,$(addprefix $(1),_CFLAGS),$(addprefix $(1),_LDFLAGS))))
+
 
 endef
 
-$(foreach build, $(BUILD), $(info $(call BUILD_template,$(build))))
+### MAIN ######################################################################
+# Iterate over BUILD: debug, release
+
+$(foreach build, $(BUILD), $(eval $(call BUILD_template,$(build))))
 
 clean:
 	@echo "[CLEAN]"

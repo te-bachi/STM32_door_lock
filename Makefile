@@ -18,11 +18,14 @@ PROGRAMS                    = door_lock
 
 ### DOOR LOCK #################################################################
 
-door_lock_LDSCRIPT        	= ldscripts/hello.ld
+door_lock_LDSCRIPT        	= ldscripts/libs.ld \
+                              ldscripts/mem.ld \
+                              ldscripts/sections.ld
 door_lock_CFLAGS            = 
 door_lock_LDFLAGS           = 
 door_lock_SOURCE            = main.c \
-                              mfrc522.cpp
+                              mfrc522.cpp \
+                              bla.c
 
 ### LIBRARIES #################################################################
 
